@@ -24,7 +24,7 @@ fileprivate class CachedImageEntry {
 
 // MARK: - DropBoxImageService
 
-public final class DropBoxImageService: ImageCacheClient {
+final class DropBoxImageService: ImageCacheClient {
     
     // MARK: - Private Properties
     

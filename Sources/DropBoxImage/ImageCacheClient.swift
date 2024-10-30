@@ -34,14 +34,14 @@ public protocol ImageCacheClient {
 
 // MARK: - Dependency Key
 
-extension DependencyValues {
+public extension DependencyValues {
     var imageCacheClient: ImageCacheClient {
         get { self[ImageCacheClientKey.self] }
         set { self[ImageCacheClientKey.self] = newValue }
     }
     
-    private struct ImageCacheClientKey: DependencyKey {
-        static let liveValue: ImageCacheClient = {
+    struct ImageCacheClientKey: DependencyKey {
+        public static let liveValue: ImageCacheClient = {
             let service = DropBoxImageService()
             
             if let client = DropboxClientsManager.authorizedClient {

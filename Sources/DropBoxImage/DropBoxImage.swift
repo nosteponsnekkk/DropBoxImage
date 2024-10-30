@@ -8,9 +8,8 @@
 import SwiftUI
 import Dependencies
 
-struct DropBoxImage<Placeholder: View>: View {
+public struct DropBoxImage<Placeholder: View>: View {
     
-    // Inject the ImageCacheClient using Dependencies
     @Dependency(\.imageCacheClient) private var imageCacher
     
     let imagePath: String
@@ -28,7 +27,7 @@ struct DropBoxImage<Placeholder: View>: View {
         self.imagePath = imagePath
     }
     
-    var body: some View {
+    public var body: some View {
         content
             .onAppear {
                 loadImage()
@@ -57,7 +56,7 @@ struct DropBoxImage<Placeholder: View>: View {
         guard !isLoading && image == nil else { return }
         isLoading = true
         
-        // Start a Task to handle async image loading
+        // Starts a Task to handle async image loading
         loadTask = Task {
             // Handle potential cancellation
             defer { isLoading = false }
