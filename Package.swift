@@ -14,8 +14,8 @@ let package = Package(
     ],
     dependencies: [
         // Dependencies declare other packages that this package depends on.
-        .package(url: "https://github.com/dropbox/SwiftyDropbox.git", from: "10.0.0"),
-        .package(url: "https://github.com/pointfreeco/swift-dependencies.git", from: "0.1.0"),
+        .package(url: "https://github.com/dropbox/SwiftyDropbox.git", from: "10.1.0"),
+        .package(url: "https://github.com/pointfreeco/swift-dependencies.git", from: "1.4.1"),
         // Add other dependencies here
     ],
     targets: [
