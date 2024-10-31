@@ -49,5 +49,7 @@ public extension DependencyValues {
             }
             return service
         }()
+        
+        public init() {}
     }
 }
