@@ -14,10 +14,6 @@ import Dependencies
 
 /// A protocol defining the necessary methods for an image caching client.
 public protocol ImageCacheClient {
-    /// Sets the Dropbox client to be used for downloading images.
-    /// - Parameter client: The `DropboxClient` instance.
-    func setClient(_ client: DropboxClient)
-    
     /// Retrieves an image for the given Dropbox file path asynchronously.
     /// - Parameter filePath: The Dropbox file path of the image.
     /// - Returns: The retrieved `UIImage` or `nil` if not found.
@@ -41,15 +37,7 @@ public extension DependencyValues {
     }
     
     struct ImageCacheClientKey: DependencyKey {
-        public static let liveValue: ImageCacheClient = {
-            let service = DropBoxImageService()
-            
-            if let client = DropboxClientsManager.authorizedClient {
-                service.setClient(client)
-            }
-            return service
-        }()
-        
+        public static let liveValue: ImageCacheClient = DropBoxImageService()
         public init() {}
     }
 }

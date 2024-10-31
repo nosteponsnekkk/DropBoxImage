@@ -28,7 +28,9 @@ final class DropBoxImageService: ImageCacheClient {
     
     // MARK: - Private Properties
     
-    private var client: DropboxClient?
+    private var client: DropboxClient? {
+        DropboxClientsManager.authorizedClient
+    }
     
     private let memoryCache = NSCache<NSString, CachedImageEntry>()
     private let ioQueue: DispatchQueue
@@ -77,10 +79,6 @@ final class DropBoxImageService: ImageCacheClient {
     }
     
     // MARK: - ImageCacheClient Methods
-    
-    public func setClient(_ client: DropboxClient) {
-        self.client = client
-    }
     
     /// Fetches an image from cache or Dropbox asynchronously, ensuring it is up-to-date based on `rev` only on first access per session.
     /// - Parameter filePath: The Dropbox file path of the image.
