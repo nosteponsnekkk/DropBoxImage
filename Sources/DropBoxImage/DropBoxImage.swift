@@ -12,7 +12,7 @@ public struct DropBoxImage<Placeholder: View>: View {
     
     @Dependency(\.imageCacheClient) private var imageCacher
     
-    let imagePath: String
+    let imagePath: String?
     let placeholder: Placeholder
     
     @State private var image: UIImage? = nil
