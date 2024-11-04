@@ -83,7 +83,8 @@ final class DropBoxImageService: ImageCacheClient {
     /// Fetches an image from cache or Dropbox asynchronously, ensuring it is up-to-date based on `rev` only on first access per session.
     /// - Parameter filePath: The Dropbox file path of the image.
     /// - Returns: The `UIImage` if available and up-to-date, else `nil`.
-    public func image(at filePath: String) async -> UIImage? {
+    public func image(at filePath: String?) async -> UIImage? {
+        guard let filePath else { return nil }
         let key = cacheKey(for: filePath)
         let nsKey = key as NSString
         

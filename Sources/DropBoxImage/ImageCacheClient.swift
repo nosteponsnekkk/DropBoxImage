@@ -17,7 +17,7 @@ public protocol ImageCacheClient {
     /// Retrieves an image for the given Dropbox file path asynchronously.
     /// - Parameter filePath: The Dropbox file path of the image.
     /// - Returns: The retrieved `UIImage` or `nil` if not found.
-    func image(at filePath: String) async -> UIImage?
+    func image(at filePath: String?) async -> UIImage?
     
     /// Prefetches images for the given Dropbox file paths.
     /// - Parameter filePaths: Array of Dropbox file paths to prefetch.
