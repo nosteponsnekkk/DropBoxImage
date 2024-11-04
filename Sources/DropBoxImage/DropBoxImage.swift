@@ -21,7 +21,7 @@ public struct DropBoxImage<Placeholder: View>: View {
     // Task to manage image loading
     @State private var loadTask: Task<Void, Never>? = nil
     
-    public init(imagePath: String,
+    public init(imagePath: String?,
          @ViewBuilder placeholder: () -> Placeholder){
         self.placeholder = placeholder()
         self.imagePath = imagePath
