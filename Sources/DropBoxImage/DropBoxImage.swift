@@ -22,7 +22,7 @@ public struct DropBoxImage<Placeholder: View>: View {
     @State private var loadTask: Task<Void, Never>? = nil
     
     public init(imagePath: String?,
-         @ViewBuilder placeholder: () -> Placeholder){
+                @ViewBuilder placeholder: () -> Placeholder){
         self.placeholder = placeholder()
         self.imagePath = imagePath
     }
@@ -35,6 +35,14 @@ public struct DropBoxImage<Placeholder: View>: View {
             .onDisappear {
                 cancelLoading()
             }
+            .onChange(of: imagePath) { newPath in
+                cancelLoading()
+                
+                image = nil
+                isLoading = false
+                
+                loadImage()
+            }
     }
     
     @ViewBuilder
@@ -44,10 +52,8 @@ public struct DropBoxImage<Placeholder: View>: View {
                 .resizable()
                 .scaledToFill()
         } else if isLoading {
-            //TODO: Loading placeholder
             placeholder
         } else {
-            //TODO: Failed placeholder
             placeholder
         }
     }
@@ -56,26 +62,21 @@ public struct DropBoxImage<Placeholder: View>: View {
         guard !isLoading && image == nil else { return }
         isLoading = true
         
-        // Starts a Task to handle async image loading
         loadTask = Task {
-            // Handle potential cancellation
             defer { isLoading = false }
             
             if Task.isCancelled {
                 return
             }
             
-            // Await the asynchronous image retrieval
             if let fetchedImage = await imageCacher.image(at: imagePath) {
                 if Task.isCancelled {
                     return
                 }
-                // Update the UI on the main thread
                 await MainActor.run {
                     self.image = fetchedImage
                 }
             } else {
-                // Handle the case where the image could not be fetched
                 await MainActor.run {
                     self.image = nil
                 }
