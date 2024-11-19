@@ -48,13 +48,10 @@ public struct DropBoxImage<Placeholder: View>: View {
                 .resizable()
                 .scaledToFill()
         } else if loader.isLoading {
-            // Loading placeholder
-            ProgressView()
+            placeholder
         } else if loader.hasFailed {
-            // Failed to load placeholder
             placeholder
         } else {
-            // Default placeholder when imagePath is nil
             placeholder
         }
     }
