@@ -48,8 +48,8 @@ final class DropBoxImageService: ImageCacheClient {
     private let checkedRevKeysQueue = DispatchQueue(label: "com.dropboximageservice.checkedRevKeysQueue", attributes: .concurrent)
     
     // MARK: - Initialization
-    
-    public init() {
+    static let shared = DropBoxImageService()
+    private init() {
         memoryCache.totalCostLimit = maxMemoryCacheCost
         memoryCache.countLimit = 1000 // Adjust as needed
         

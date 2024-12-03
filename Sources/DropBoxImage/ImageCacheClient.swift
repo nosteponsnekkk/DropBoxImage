@@ -37,7 +37,7 @@ public extension DependencyValues {
     }
     
     struct ImageCacheClientKey: DependencyKey {
-        public static let liveValue: ImageCacheClient = DropBoxImageService()
+        public static let liveValue: ImageCacheClient = DropBoxImageService.shared
         public init() {}
     }
 }
