@@ -36,8 +36,8 @@ final class DropBoxImageService: ImageCacheClient {
     private let ioQueue: DispatchQueue
     private let fileManager: FileManager
     private let diskCacheURL: URL
-    private let maxDiskCacheSize: UInt64 = 500 * 1024 * 1024 // 500 MB
-    private let maxMemoryCacheCost: Int = 100 * 1024 * 1024 // 100 MB
+    private let maxDiskCacheSize: UInt64 = 2 * 1024 * 1024 * 1024 // 2 GB
+    private let maxMemoryCacheCost: Int = 400 * 1024 * 1024 // 400 MB
     
     // To track access order for LRU
     private var accessOrder: [String] = []
@@ -51,7 +51,7 @@ final class DropBoxImageService: ImageCacheClient {
     static let shared = DropBoxImageService()
     private init() {
         memoryCache.totalCostLimit = maxMemoryCacheCost
-        memoryCache.countLimit = 1000 // Adjust as needed
+        memoryCache.countLimit = 5000
         
         fileManager = FileManager.default
         // Create disk cache directory
