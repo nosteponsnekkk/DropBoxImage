@@ -419,7 +419,7 @@ final class DropBoxImageService: ImageCacheClient {
     private func decodeImage(data: Data) -> UIImage? {
         guard let image = UIImage(data: data) else { return nil }
         // Force decoding
-        UIGraphicsBeginImageContextWithOptions(image.size, true, image.scale)
+        UIGraphicsBeginImageContextWithOptions(image.size, false, image.scale)
         image.draw(at: .zero)
         let decodedImage = UIGraphicsGetImageFromCurrentImageContext()
         UIGraphicsEndImageContext()
