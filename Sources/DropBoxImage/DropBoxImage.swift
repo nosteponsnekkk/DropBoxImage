@@ -11,15 +11,19 @@ import Dependencies
 public struct DropBoxImage<Placeholder: View>: View {
     
     let imagePath: String?
+    let renderingMode: Image.TemplateRenderingMode
     let placeholder: Placeholder
+    
     
     // Use StateObject to manage the ImageLoader's lifecycle
     @StateObject private var loader: ImageLoader
     
     public init(imagePath: String?,
+                renderingMode: Image.TemplateRenderingMode = .original,
                 @ViewBuilder placeholder: () -> Placeholder){
         self.imagePath = imagePath
         self.placeholder = placeholder()
+        self.renderingMode = renderingMode
         // Initialize the loader with the initial imagePath
         _loader = StateObject(
             wrappedValue: ImageLoader(
@@ -45,6 +49,7 @@ public struct DropBoxImage<Placeholder: View>: View {
     private var content: some View {
         if let uiImage = loader.image {
             Image(uiImage: uiImage)
+                .renderingMode(renderingMode)
                 .resizable()
                 .scaledToFill()
         } else if loader.isLoading {
