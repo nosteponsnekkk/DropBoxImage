@@ -12,19 +12,20 @@ import Dependencies
 
 // MARK: - ImageCacheClient Protocol
 
-/// A protocol defining the necessary methods for an image caching client.
+/// A protocol defining the necessary asynchronous methods for an image caching client.
 public protocol ImageCacheClient {
-    /// Retrieves an image for the given Dropbox file path asynchronously.
+    /// Asynchronously retrieves an image for the given Dropbox file path.
+    ///
     /// - Parameter filePath: The Dropbox file path of the image.
     /// - Returns: The retrieved `UIImage` or `nil` if not found.
     func image(at filePath: String?) async -> UIImage?
     
-    /// Prefetches images for the given Dropbox file paths.
-    /// - Parameter filePaths: Array of Dropbox file paths to prefetch.
-    func prefetch(filePaths: [String])
+    /// Asynchronously prefetches images for the given Dropbox file paths.
+    ///
+    /// - Parameter filePaths: An array of Dropbox file paths to prefetch.
+    func prefetch(filePaths: [String]) async
     
-    /// Clears both memory and disk caches asynchronously.
-    /// - Returns: Void.
+    /// Asynchronously clears both memory and disk caches.
     func clearCache() async
 }
 
