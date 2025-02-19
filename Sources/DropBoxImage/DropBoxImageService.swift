@@ -3,7 +3,6 @@
 //  DropBoxImage
 //
 //  Created by Oleg on 30.10.2024.
-//  Revised by ChatGPT on 19.02.2025
 //
 
 import Foundation
@@ -121,112 +120,112 @@ final class DropBoxImageService: ImageCacheClient {
 
     // MARK: - Public APIs
 
-    /// Asynchronously fetches an image from the cache or downloads it from Dropbox if not available
-    /// or if the Dropbox revision (`rev`) has changed.
-    ///
-    /// - Parameter filePath: The Dropbox file path of the image.
-    /// - Returns: The cached or newly downloaded `UIImage`, or `nil` if fetching fails.
-    public func image(at filePath: String?) async -> UIImage? {
-        guard let filePath else { return nil }
+    /// Retrieves an image for the given Dropbox file path.
+    /// - Parameters:
+    ///   - filePath: The Dropbox file path.
+    ///   - checkRev: If `true`, the method verifies that the cached image’s revision matches Dropbox.
+    ///               If `false`, it returns any cached image without verifying its revision.
+    public func image(at filePath: String?, checkRev: Bool = true) async -> UIImage? {
+        guard let filePath = filePath else { return nil }
         let key = cacheKey(for: filePath)
         let nsKey = key as NSString
 
         // 1. Check in-memory cache.
         if let cachedEntry = memoryCache.object(forKey: nsKey) {
-            let hasChecked = await hasCheckedRev(for: key)
-            if !hasChecked {
-                if let currentRev = await getCurrentRev(for: filePath) {
-                    if currentRev != cachedEntry.rev {
-                        // Revision changed; download updated image.
-                        if let (image, rev) = await downloadImage(from: filePath) {
-                            await store(image: image, rev: rev, forKey: key)
-                            await markRevAsChecked(for: key)
-                            return image
+            if checkRev {
+                let hasChecked = await hasCheckedRev(for: key)
+                if !hasChecked {
+                    if let currentRev = await getCurrentRev(for: filePath) {
+                        if currentRev != cachedEntry.rev {
+                            if let (image, rev) = await downloadImage(from: filePath) {
+                                await store(image: image, rev: rev, forKey: key)
+                                await markRevAsChecked(for: key)
+                                return image
+                            } else {
+                                await markRevAsChecked(for: key)
+                                return cachedEntry.image
+                            }
                         } else {
                             await markRevAsChecked(for: key)
+                            await updateAccessOrder(for: key)
                             return cachedEntry.image
                         }
                     } else {
-                        // Revision is up-to-date.
                         await markRevAsChecked(for: key)
                         await updateAccessOrder(for: key)
                         return cachedEntry.image
                     }
                 } else {
-                    // Could not fetch current revision; assume cached image is valid.
-                    await markRevAsChecked(for: key)
                     await updateAccessOrder(for: key)
                     return cachedEntry.image
                 }
-            } else {
-                // Revision was already checked during this session.
+            } else { // Rev check is disabled.
                 await updateAccessOrder(for: key)
                 return cachedEntry.image
             }
         }
-
-        // 2. Attempt to load image from disk cache.
+        
+        // 2. Check disk cache.
         if let cachedEntry = await loadImageAndRevFromDisk(forKey: key) {
-            let hasChecked = await hasCheckedRev(for: key)
-            if !hasChecked {
-                if let currentRev = await getCurrentRev(for: filePath) {
-                    if currentRev != cachedEntry.rev {
-                        // Revision updated; download the new image.
-                        if let (image, rev) = await downloadImage(from: filePath) {
-                            await store(image: image, rev: rev, forKey: key)
-                            await markRevAsChecked(for: key)
-                            return image
+            if checkRev {
+                let hasChecked = await hasCheckedRev(for: key)
+                if !hasChecked {
+                    if let currentRev = await getCurrentRev(for: filePath) {
+                        if currentRev != cachedEntry.rev {
+                            if let (image, rev) = await downloadImage(from: filePath) {
+                                await store(image: image, rev: rev, forKey: key)
+                                await markRevAsChecked(for: key)
+                                return image
+                            } else {
+                                await markRevAsChecked(for: key)
+                                return cachedEntry.image
+                            }
                         } else {
                             await markRevAsChecked(for: key)
+                            memoryCache.setObject(cachedEntry, forKey: nsKey, cost: imageCost(for: cachedEntry.image))
+                            await updateAccessOrder(for: key)
                             return cachedEntry.image
                         }
                     } else {
-                        // Cached revision is valid.
                         await markRevAsChecked(for: key)
                         memoryCache.setObject(cachedEntry, forKey: nsKey, cost: imageCost(for: cachedEntry.image))
                         await updateAccessOrder(for: key)
                         return cachedEntry.image
                     }
                 } else {
-                    // Could not fetch revision; assume cached image is valid.
-                    await markRevAsChecked(for: key)
                     memoryCache.setObject(cachedEntry, forKey: nsKey, cost: imageCost(for: cachedEntry.image))
                     await updateAccessOrder(for: key)
                     return cachedEntry.image
                 }
             } else {
-                // Revision already checked.
                 memoryCache.setObject(cachedEntry, forKey: nsKey, cost: imageCost(for: cachedEntry.image))
                 await updateAccessOrder(for: key)
                 return cachedEntry.image
             }
         }
-
-        // 3. Download the image from Dropbox if not cached.
+        
+        // 3. Download from Dropbox.
         if let (image, rev) = await downloadImage(from: filePath) {
             await store(image: image, rev: rev, forKey: key)
-            await markRevAsChecked(for: key)
+            if checkRev {
+                await markRevAsChecked(for: key)
+            }
             return image
         }
-
+        
         return nil
     }
-
-    /// Asynchronously prefetches (downloads and caches) multiple images concurrently.
-    ///
-    /// Use this method to “warm up” the cache.
-    ///
-    /// - Parameter filePaths: An array of Dropbox file paths.
-    public func prefetch(filePaths: [String]) async {
-        await withTaskGroup(of: Void.self) { group in
-            for filePath in filePaths {
-                group.addTask {
-                    _ = await self.image(at: filePath)
-                }
-            }
-        }
-    }
-
+    
+    /// Prefetches images for the given Dropbox file paths.
+       public func prefetch(filePaths: [String], checkRev: Bool = true) async {
+           await withTaskGroup(of: Void.self) { group in
+               for filePath in filePaths {
+                   group.addTask {
+                       _ = await self.image(at: filePath, checkRev: checkRev)
+                   }
+               }
+           }
+       }
     /// Synchronously clears both the memory and disk caches.
     ///
     /// Call this method when you need to free up cached data.

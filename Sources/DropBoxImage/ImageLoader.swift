@@ -9,74 +9,59 @@ import SwiftUI
 import Combine
 import Dependencies
 
-// ObservableObject to manage image loading
 final class ImageLoader: ObservableObject {
-    @Published var image: UIImage?
-    @Published var isLoading: Bool = false
-    @Published var hasFailed: Bool = false
-    
+    @Published public var image: UIImage?
+    @Published public var isLoading: Bool = false
+    @Published public var hasFailed: Bool = false
+
     private var imagePath: String?
-    private var loadTask: Task<Void, Never>? = nil
-    @Dependency(\.imageCacheClient) var imageCacher
-    
-    init(imagePath: String?) {
+    private let cacheClient: ImageCacheClient
+    private var currentTask: Task<Void, Never>? = nil
+    private let checkRevision: Bool
+
+    /// Initializes the loader.
+    /// - Parameters:
+    ///   - imagePath: The Dropbox file path.
+    ///   - checkRevision: When `true` (the default), the loader will verify the image revision.
+    ///                    Set to `false` to disable revision checking.
+    ///   - cacheClient: The image cache service.
+    init(imagePath: String?, checkRevision: Bool = true, cacheClient: ImageCacheClient = DropBoxImageService.shared) {
         self.imagePath = imagePath
-        loadImage()
-    }
-    
-    // Method to update the imagePath and reload the image
-    func updateImagePath(_ newPath: String?) {
-        guard newPath != imagePath else { return }
-        imagePath = newPath
-        loadImage()
-    }
-    
-    // Method to load the image asynchronously
-    private func loadImage() {
-        // Cancel any existing loading task
-        loadTask?.cancel()
-        
-        // Reset states
-        self.image = nil
-        self.hasFailed = false
-        
-        guard let path = imagePath else {
-            self.isLoading = false
-            self.hasFailed = true
-            return
-        }
-        
-        self.isLoading = true
-        
-        // Start a new task to load the image
-        loadTask = Task {
-            defer { 
-                DispatchQueue.main.async { [weak self] in
-                    self?.isLoading = false
-                }
-            }
-            
-            if Task.isCancelled { return }
-            
-            // Attempt to fetch the image from the cache
-            if let fetchedImage = await imageCacher.image(at: path) {
-                if Task.isCancelled { return }
-                // Update the image on the main thread
-                await MainActor.run {
-                    self.image = fetchedImage
-                }
-            } else {
-                // Handle failure to fetch the image
-                await MainActor.run {
-                    self.hasFailed = true
-                }
-            }
+        self.cacheClient = cacheClient
+        self.checkRevision = checkRevision
+        if let imagePath = imagePath {
+            loadImage(from: imagePath)
         }
     }
     
-    // Cancel the loading task if needed
-    func cancelLoading() {
-        loadTask?.cancel()
-        loadTask = nil
+    /// Updates the image path and reloads the image.
+    public func updateImagePath(_ newPath: String?) {
+        if imagePath != newPath {
+            imagePath = newPath
+            image = nil
+            hasFailed = false
+            loadImage(from: newPath)
+        }
+    }
+    
+    /// Cancels any ongoing image load.
+    public func cancelLoading() {
+        currentTask?.cancel()
+        currentTask = nil
+    }
+    
+    /// Loads the image asynchronously using the cache client.
+    private func loadImage(from filePath: String?) {
+        guard let filePath = filePath else { return }
+        isLoading = true
+        currentTask?.cancel()
+        currentTask = Task {
+            let fetchedImage = await cacheClient.image(at: filePath, checkRev: checkRevision)
+            await MainActor.run {
+                self.image = fetchedImage
+                self.isLoading = false
+                self.hasFailed = (fetchedImage == nil)
+            }
+        }
     }
 }
