@@ -31,6 +31,16 @@ public protocol ImageCacheClient {
     
     /// Asynchronously clears both memory and disk caches.
     func clearCache() async
+    
+    /// - Parameters:
+    ///   - filePaths: An array of Dropbox file paths to prefetch.
+    ///   - checkRev: A flag indicating whether to verify the image revision with Dropbox.
+    ///   - withConcurrencyOf concurrency: A number of concurrent operations.
+    func prefetch(
+        filePaths: [String],
+        checkRev: Bool = true,
+        withConcurrencyOf concurrency: Int
+    ) async
 }
 
 // MARK: - Dependency Key

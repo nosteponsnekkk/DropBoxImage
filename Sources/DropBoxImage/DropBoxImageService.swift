@@ -29,50 +29,50 @@ fileprivate final class CachedImageEntry {
 /// verifies the freshness using Dropbox’s `rev` property on first access per session,
 /// and supports concurrent prefetching of images.
 final class DropBoxImageService: ImageCacheClient {
-
+    
     // MARK: - Private Properties
-
+    
     /// Dropbox client instance (if authorized).
     private var client: DropboxClient? {
         DropboxClientsManager.authorizedClient
     }
-
+    
     /// In-memory cache for images.
     private let memoryCache = NSCache<NSString, CachedImageEntry>()
-
+    
     /// A concurrent dispatch queue for performing disk I/O operations.
     private let ioQueue: DispatchQueue
-
+    
     /// FileManager instance for disk operations.
     private let fileManager: FileManager
-
+    
     /// URL for the disk cache directory.
     private let diskCacheURL: URL
-
+    
     /// Maximum allowed disk cache size (800 MB).
     private let maxDiskCacheSize: UInt64 = 800 * 1024 * 1024
     /// Maximum allowed cost for the memory cache (400 MB).
     private let maxMemoryCacheCost: Int = 400 * 1024 * 1024
-
+    
     /// Array to track LRU (least recently used) access order for cached keys.
     private var accessOrder: [String] = []
     private let accessOrderQueue = DispatchQueue(label: "com.dropboximageservice.accessOrderQueue", attributes: .concurrent)
-
+    
     /// Set to track which cache keys have had their revision checked in this session.
     private var checkedRevKeys: Set<String> = []
     private let checkedRevKeysQueue = DispatchQueue(label: "com.dropboximageservice.checkedRevKeysQueue", attributes: .concurrent)
-
+    
     // MARK: - Initialization
-
+    
     /// Shared singleton instance.
     static let shared = DropBoxImageService()
-
+    
     private init() {
         memoryCache.totalCostLimit = maxMemoryCacheCost
         memoryCache.countLimit = 5000
-
+        
         fileManager = FileManager.default
-
+        
         // Create (or validate) the disk cache directory.
         if let cacheDir = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first {
             diskCacheURL = cacheDir.appendingPathComponent("DropBoxImageCache")
@@ -86,9 +86,9 @@ final class DropBoxImageService: ImageCacheClient {
         } else {
             fatalError("Unable to access caches directory")
         }
-
+        
         ioQueue = DispatchQueue(label: "com.dropboximageservice.ioQueue", attributes: .concurrent)
-
+        
         // Subscribe to memory warning notifications to clear in-memory cache.
         NotificationCenter.default.addObserver(
             self,
@@ -97,13 +97,13 @@ final class DropBoxImageService: ImageCacheClient {
             object: nil
         )
     }
-
+    
     deinit {
         NotificationCenter.default.removeObserver(self)
     }
-
+    
     // MARK: - Memory Warning Handling
-
+    
     /// Called when the app receives a memory warning.
     /// This method clears the in-memory cache immediately.
     /// Note: It cannot be async because it is called via an Objective-C selector.
@@ -112,14 +112,14 @@ final class DropBoxImageService: ImageCacheClient {
         // Optionally, you can also clear the disk cache here.
         // For example, using a background Task:
         /*
-        Task {
-            await clearCacheAsync()
-        }
-        */
+         Task {
+         await clearCacheAsync()
+         }
+         */
     }
-
+    
     // MARK: - Public APIs
-
+    
     /// Retrieves an image for the given Dropbox file path.
     /// - Parameters:
     ///   - filePath: The Dropbox file path.
@@ -129,7 +129,7 @@ final class DropBoxImageService: ImageCacheClient {
         guard let filePath = filePath else { return nil }
         let key = cacheKey(for: filePath)
         let nsKey = key as NSString
-
+        
         // 1. Check in-memory cache.
         if let cachedEntry = memoryCache.object(forKey: nsKey) {
             if checkRev {
@@ -217,15 +217,36 @@ final class DropBoxImageService: ImageCacheClient {
     }
     
     /// Prefetches images for the given Dropbox file paths.
-       public func prefetch(filePaths: [String], checkRev: Bool = true) async {
-           await withTaskGroup(of: Void.self) { group in
-               for filePath in filePaths {
-                   group.addTask {
-                       _ = await self.image(at: filePath, checkRev: checkRev)
-                   }
-               }
-           }
-       }
+    public func prefetch(filePaths: [String], checkRev: Bool = true) async {
+        await withTaskGroup(of: Void.self) { group in
+            for filePath in filePaths {
+                group.addTask {
+                    _ = await self.image(at: filePath, checkRev: checkRev)
+                }
+            }
+        }
+    }
+    
+    /// - Parameters:
+    ///   - filePaths: An array of Dropbox file paths to prefetch.
+    ///   - checkRev: A flag indicating whether to verify the image revision with Dropbox.
+    ///   - withConcurrencyOf concurrency: A number of concurrent operations.
+    public func prefetch(
+        filePaths: [String],
+        checkRev: Bool = true,
+        withConcurrencyOf concurrency: Int
+    ) async {
+        let semaphore = AsyncSemaphore(value: concurrency)
+        await withTaskGroup(of: Void.self) { group in
+            for filePath in filePaths {
+                group.addTask {
+                    await semaphore.wait()  // Wait for a permit.
+                    _ = await self.image(at: filePath, checkRev: checkRev)
+                    await semaphore.signal() // Release the permit.
+                }
+            }
+        }
+    }
     /// Synchronously clears both the memory and disk caches.
     ///
     /// Call this method when you need to free up cached data.
@@ -233,7 +254,7 @@ final class DropBoxImageService: ImageCacheClient {
         clearMemoryCache()
         clearDiskCacheSync()
     }
-
+    
     /// Asynchronously clears both the memory and disk caches.
     ///
     /// Use this version when calling from a Swift Concurrency context.
@@ -260,9 +281,9 @@ final class DropBoxImageService: ImageCacheClient {
             }
         }
     }
-
+    
     // MARK: - Private Disk Cache Helpers
-
+    
     /// Synchronously clears the disk cache and resets related tracking data.
     private func clearDiskCacheSync() {
         ioQueue.sync(flags: .barrier) {
@@ -278,9 +299,9 @@ final class DropBoxImageService: ImageCacheClient {
             }
         }
     }
-
+    
     // MARK: - Private Utility Methods
-
+    
     /// Clears the in-memory cache and resets revision tracking.
     private func clearMemoryCache() {
         memoryCache.removeAllObjects()
@@ -289,7 +310,7 @@ final class DropBoxImageService: ImageCacheClient {
         }
         resetCheckedRevKeys()
     }
-
+    
     /// Generates a unique cache key for a given Dropbox file path using SHA256 hashing.
     ///
     /// - Parameter filePath: The Dropbox file path.
@@ -302,7 +323,7 @@ final class DropBoxImageService: ImageCacheClient {
         }
         return hash.map { String(format: "%02x", $0) }.joined()
     }
-
+    
     /// Loads an image and its revision from disk asynchronously.
     ///
     /// - Parameter key: The cache key.
@@ -316,7 +337,7 @@ final class DropBoxImageService: ImageCacheClient {
                 }
                 let imageURL = self.diskCacheURL.appendingPathComponent(key)
                 let revURL = self.diskCacheURL.appendingPathComponent("\(key).rev")
-
+                
                 guard
                     let imageData = try? Data(contentsOf: imageURL),
                     let image = self.decodeImage(data: imageData),
@@ -326,7 +347,7 @@ final class DropBoxImageService: ImageCacheClient {
                     continuation.resume(returning: nil)
                     return
                 }
-
+                
                 let cachedEntry = CachedImageEntry(image: image, rev: rev)
                 // Update file access date to reflect recent use.
                 self.updateFileAccessDate(for: imageURL)
@@ -334,7 +355,7 @@ final class DropBoxImageService: ImageCacheClient {
             }
         }
     }
-
+    
     /// Downloads an image from Dropbox asynchronously.
     ///
     /// - Parameter filePath: The Dropbox file path.
@@ -356,7 +377,7 @@ final class DropBoxImageService: ImageCacheClient {
             return nil
         }
     }
-
+    
     /// Stores an image (and its revision) into both the memory and disk caches asynchronously.
     ///
     /// - Parameters:
@@ -368,7 +389,7 @@ final class DropBoxImageService: ImageCacheClient {
         let cachedEntry = CachedImageEntry(image: image, rev: rev)
         memoryCache.setObject(cachedEntry, forKey: key as NSString, cost: imageCost(for: image))
         await updateAccessOrder(for: key)
-
+        
         // Store on disk.
         await withCheckedContinuation { continuation in
             ioQueue.async(flags: .barrier) { [weak self] in
@@ -378,7 +399,7 @@ final class DropBoxImageService: ImageCacheClient {
                 }
                 let imageURL = self.diskCacheURL.appendingPathComponent(key)
                 let revURL = self.diskCacheURL.appendingPathComponent("\(key).rev")
-
+                
                 if let data = image.pngData(), let revData = rev.data(using: .utf8) {
                     do {
                         try data.write(to: imageURL, options: .atomic)
@@ -393,7 +414,7 @@ final class DropBoxImageService: ImageCacheClient {
             }
         }
     }
-
+    
     /// Fetches the current revision (`rev`) for a Dropbox file asynchronously.
     ///
     /// - Parameter filePath: The Dropbox file path.
@@ -411,7 +432,7 @@ final class DropBoxImageService: ImageCacheClient {
             return nil
         }
     }
-
+    
     /// Updates the file's last modification date to the current date.
     ///
     /// - Parameter fileURL: The URL of the file to update.
@@ -422,7 +443,7 @@ final class DropBoxImageService: ImageCacheClient {
             print("Error updating file access date: \(error)")
         }
     }
-
+    
     /// Decodes raw image data into a `UIImage` and forces decompression off the main thread.
     ///
     /// - Parameter data: The raw image data.
@@ -436,7 +457,7 @@ final class DropBoxImageService: ImageCacheClient {
         UIGraphicsEndImageContext()
         return decodedImage
     }
-
+    
     /// Calculates an approximate memory cost for a given image.
     ///
     /// - Parameter image: The `UIImage` for which to calculate cost.
@@ -445,7 +466,7 @@ final class DropBoxImageService: ImageCacheClient {
         guard let cgImage = image.cgImage else { return 1 }
         return cgImage.bytesPerRow * cgImage.height
     }
-
+    
     /// Updates the LRU (least recently used) access order for the given cache key.
     ///
     /// - Parameter key: The cache key to update.
@@ -464,44 +485,44 @@ final class DropBoxImageService: ImageCacheClient {
             }
         }
     }
-
+    
     /// Checks and controls the disk cache size, evicting the least recently used files if necessary.
     private func controlDiskCacheSize() {
         ioQueue.async(flags: .barrier) { [weak self] in
             guard let self = self else { return }
             let resourceKeys: Set<URLResourceKey> = [.isDirectoryKey, .contentAccessDateKey, .totalFileAllocatedSizeKey]
-
+            
             guard let fileURLs = try? self.fileManager.contentsOfDirectory(
                 at: self.diskCacheURL,
                 includingPropertiesForKeys: Array(resourceKeys),
                 options: .skipsHiddenFiles
             ) else { return }
-
+            
             var cachedFiles: [URL: [URLResourceKey: Any]] = [:]
             var currentCacheSize: UInt64 = 0
-
+            
             for fileURL in fileURLs {
                 // Exclude revision files from size calculations.
                 if fileURL.pathExtension == "rev" { continue }
-
+                
                 guard let resourceValues = try? fileURL.resourceValues(forKeys: resourceKeys),
                       resourceValues.isDirectory == false,
                       let fileSize = resourceValues.totalFileAllocatedSize,
                       let _ = resourceValues.contentAccessDate else { continue }
-
+                
                 cachedFiles[fileURL] = resourceValues.allValues
                 currentCacheSize += UInt64(fileSize)
             }
-
+            
             if currentCacheSize <= self.maxDiskCacheSize { return }
-
+            
             // Sort files by last access date (oldest first).
             let sortedFiles = cachedFiles.keys.sorted {
                 let date1 = cachedFiles[$0]?[.contentAccessDateKey] as? Date ?? .distantPast
                 let date2 = cachedFiles[$1]?[.contentAccessDateKey] as? Date ?? .distantPast
                 return date1 < date2
             }
-
+            
             for fileURL in sortedFiles {
                 do {
                     let attributes = try fileURL.resourceValues(forKeys: [.totalFileAllocatedSizeKey])
@@ -518,9 +539,9 @@ final class DropBoxImageService: ImageCacheClient {
             }
         }
     }
-
+    
     // MARK: - Revision Check Tracking
-
+    
     /// Asynchronously checks if the given cache key’s revision has already been verified this session.
     ///
     /// - Parameter key: The cache key.
@@ -533,7 +554,7 @@ final class DropBoxImageService: ImageCacheClient {
             }
         }
     }
-
+    
     /// Marks a cache key’s revision as having been checked.
     ///
     /// - Parameter key: The cache key.
@@ -545,11 +566,39 @@ final class DropBoxImageService: ImageCacheClient {
             }
         }
     }
-
+    
     /// Resets all revision check tracking.
     private func resetCheckedRevKeys() {
         checkedRevKeysQueue.async(flags: .barrier) {
             self.checkedRevKeys.removeAll()
+        }
+    }
+}
+
+internal actor AsyncSemaphore {
+    private var value: Int
+    private var waitQueue: [CheckedContinuation<Void, Never>] = []
+    
+    init(value: Int) {
+        self.value = value
+    }
+    
+    func wait() async {
+        if value > 0 {
+            value -= 1
+        } else {
+            await withCheckedContinuation { continuation in
+                waitQueue.append(continuation)
+            }
+        }
+    }
+    
+    func signal() {
+        if !waitQueue.isEmpty {
+            let continuation = waitQueue.removeFirst()
+            continuation.resume()
+        } else {
+            value += 1
         }
     }
 }
