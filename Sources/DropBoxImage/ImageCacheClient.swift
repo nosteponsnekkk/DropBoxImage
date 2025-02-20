@@ -38,7 +38,7 @@ public protocol ImageCacheClient {
     ///   - withConcurrencyOf concurrency: A number of concurrent operations.
     func prefetch(
         filePaths: [String],
-        checkRev: Bool = true,
+        checkRev: Bool,
         withConcurrencyOf concurrency: Int
     ) async
 }
