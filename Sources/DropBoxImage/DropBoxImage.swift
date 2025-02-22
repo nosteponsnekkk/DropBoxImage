@@ -44,13 +44,20 @@ public struct DropBoxImage<Placeholder: View>: View {
                 renderingMode: Image.TemplateRenderingMode = .original,
                 checkRevision: Bool = true,
                 onImageSet: ((Bool) -> Void)? = nil,
+                onImageDataLoaded: ((Data) -> Void)? = nil,
                 @ViewBuilder placeholder: () -> Placeholder) {
         self.imagePath = imagePath
         self.renderingMode = renderingMode
         self.checkRevision = checkRevision
         self.placeholder = placeholder()
         self.onImageSet = onImageSet
-        _loader = StateObject(wrappedValue: ImageLoader(imagePath: imagePath, checkRevision: checkRevision))
+        _loader = StateObject(
+            wrappedValue: ImageLoader(
+                imagePath: imagePath,
+                checkRevision: checkRevision,
+                onImageDataLoaded: onImageDataLoaded
+            )
+        )
     }
     
     public var body: some View {
@@ -83,8 +90,8 @@ public struct DropBoxImage<Placeholder: View>: View {
     DropBoxImage(imagePath: "/images/sampleImage.png",
                  checkRevision: false, // Disable revision checking for this view
                  onImageSet: { isSet in
-                     print("Image is set: \(isSet)")
-                 }) {
+        print("Image is set: \(isSet)")
+    }) {
         Color.gray
     }
 }
