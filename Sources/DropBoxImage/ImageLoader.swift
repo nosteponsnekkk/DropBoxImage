@@ -9,6 +9,8 @@ import SwiftUI
 import Combine
 import Dependencies
 
+// MARK: - ImageLoader
+
 final class ImageLoader: ObservableObject {
     @Published public var image: UIImage?
     @Published public var isLoading: Bool = false
@@ -20,12 +22,6 @@ final class ImageLoader: ObservableObject {
     private let checkRevision: Bool
     private let onImageDataLoaded: ((Data) -> Void)?
 
-    /// Initializes the loader.
-    /// - Parameters:
-    ///   - imagePath: The Dropbox file path.
-    ///   - checkRevision: When `true` (the default), the loader will verify the image revision.
-    ///                    Set to `false` to disable revision checking.
-    ///   - cacheClient: The image cache service.
     init(imagePath: String?, checkRevision: Bool = true, cacheClient: ImageCacheClient = DropBoxImageService.shared, onImageDataLoaded: ((Data) -> Void)? = nil) {
         self.imagePath = imagePath
         self.cacheClient = cacheClient
@@ -36,7 +32,6 @@ final class ImageLoader: ObservableObject {
         }
     }
     
-    /// Updates the image path and reloads the image.
     public func updateImagePath(_ newPath: String?) {
         if imagePath != newPath {
             imagePath = newPath
@@ -46,20 +41,18 @@ final class ImageLoader: ObservableObject {
         }
     }
     
-    /// Cancels any ongoing image load.
     public func cancelLoading() {
         currentTask?.cancel()
         currentTask = nil
     }
     
-    /// Loads the image asynchronously using the cache client.
     private func loadImage(from filePath: String?) {
         guard let filePath = filePath else { return }
         isLoading = true
         currentTask?.cancel()
         currentTask = Task {
             let fetchedImage = await cacheClient.image(at: filePath, checkRev: checkRevision)
-            if let data = fetchedImage?.pngData() {
+            if let data = fetchedImage?.jpegData(compressionQuality: 0.8) {
                 onImageDataLoaded?(data)
             }
             await MainActor.run {

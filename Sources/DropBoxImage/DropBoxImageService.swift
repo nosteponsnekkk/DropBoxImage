@@ -23,11 +23,29 @@ fileprivate final class CachedImageEntry {
     }
 }
 
+// MARK: - Revision Tracker Actor
+
+/// An actor to safely track which cache keys have had their revision checked.
+actor CheckedRevTracker {
+    private var checkedRevKeys: Set<String> = []
+    
+    func hasCheckedRev(for key: String) -> Bool {
+        checkedRevKeys.contains(key)
+    }
+    
+    func markRevAsChecked(for key: String) {
+        checkedRevKeys.insert(key)
+    }
+    
+    func reset() {
+        checkedRevKeys.removeAll()
+    }
+}
+
 // MARK: - DropBoxImageService
 
 /// A service that manages caching of images from Dropbox. It caches images both in memory and on disk,
-/// verifies the freshness using Dropbox’s `rev` property on first access per session,
-/// and supports concurrent prefetching of images.
+/// verifies freshness via Dropbox’s `rev` property, and supports concurrent prefetching.
 final class DropBoxImageService: ImageCacheClient {
     
     // MARK: - Private Properties
@@ -40,7 +58,7 @@ final class DropBoxImageService: ImageCacheClient {
     /// In-memory cache for images.
     private let memoryCache = NSCache<NSString, CachedImageEntry>()
     
-    /// A concurrent dispatch queue for performing disk I/O operations.
+    /// A concurrent dispatch queue for disk I/O operations.
     private let ioQueue: DispatchQueue
     
     /// FileManager instance for disk operations.
@@ -54,13 +72,8 @@ final class DropBoxImageService: ImageCacheClient {
     /// Maximum allowed cost for the memory cache (100 MB).
     private let maxMemoryCacheCost: Int = 100 * 1024 * 1024
     
-    /// Array to track LRU (least recently used) access order for cached keys.
-    private var accessOrder: [String] = []
-    private let accessOrderQueue = DispatchQueue(label: "com.dropboximageservice.accessOrderQueue", attributes: .concurrent)
-    
-    /// Set to track which cache keys have had their revision checked in this session.
-    private var checkedRevKeys: Set<String> = []
-    private let checkedRevKeysQueue = DispatchQueue(label: "com.dropboximageservice.checkedRevKeysQueue", attributes: .concurrent)
+    /// Actor for revision check tracking.
+    private let revisionTracker = CheckedRevTracker()
     
     // MARK: - Initialization
     
@@ -105,26 +118,13 @@ final class DropBoxImageService: ImageCacheClient {
     // MARK: - Memory Warning Handling
     
     /// Called when the app receives a memory warning.
-    /// This method clears the in-memory cache immediately.
-    /// Note: It cannot be async because it is called via an Objective-C selector.
     @objc private func handleMemoryWarning() {
         clearMemoryCache()
-        // Optionally, you can also clear the disk cache here.
-        // For example, using a background Task:
-        /*
-         Task {
-         await clearCacheAsync()
-         }
-         */
     }
     
     // MARK: - Public APIs
     
     /// Retrieves an image for the given Dropbox file path.
-    /// - Parameters:
-    ///   - filePath: The Dropbox file path.
-    ///   - checkRev: If `true`, the method verifies that the cached image’s revision matches Dropbox.
-    ///               If `false`, it returns any cached image without verifying its revision.
     public func image(at filePath: String?, checkRev: Bool = true) async -> UIImage? {
         guard let filePath = filePath else { return nil }
         let key = cacheKey(for: filePath)
@@ -133,34 +133,34 @@ final class DropBoxImageService: ImageCacheClient {
         // 1. Check in-memory cache.
         if let cachedEntry = memoryCache.object(forKey: nsKey) {
             if checkRev {
-                let hasChecked = await hasCheckedRev(for: key)
+                let hasChecked = await revisionTracker.hasCheckedRev(for: key)
                 if !hasChecked {
                     if let currentRev = await getCurrentRev(for: filePath) {
                         if currentRev != cachedEntry.rev {
                             if let (image, rev) = await downloadImage(from: filePath) {
                                 await store(image: image, rev: rev, forKey: key)
-                                await markRevAsChecked(for: key)
+                                await revisionTracker.markRevAsChecked(for: key)
                                 return image
                             } else {
-                                await markRevAsChecked(for: key)
+                                await revisionTracker.markRevAsChecked(for: key)
                                 return cachedEntry.image
                             }
                         } else {
-                            await markRevAsChecked(for: key)
-                            await updateAccessOrder(for: key)
+                            await revisionTracker.markRevAsChecked(for: key)
+                            updateFileAccessDate(forKey: key)
                             return cachedEntry.image
                         }
                     } else {
-                        await markRevAsChecked(for: key)
-                        await updateAccessOrder(for: key)
+                        await revisionTracker.markRevAsChecked(for: key)
+                        updateFileAccessDate(forKey: key)
                         return cachedEntry.image
                     }
                 } else {
-                    await updateAccessOrder(for: key)
+                    updateFileAccessDate(forKey: key)
                     return cachedEntry.image
                 }
-            } else { // Rev check is disabled.
-                await updateAccessOrder(for: key)
+            } else {
+                updateFileAccessDate(forKey: key)
                 return cachedEntry.image
             }
         }
@@ -168,38 +168,38 @@ final class DropBoxImageService: ImageCacheClient {
         // 2. Check disk cache.
         if let cachedEntry = await loadImageAndRevFromDisk(forKey: key) {
             if checkRev {
-                let hasChecked = await hasCheckedRev(for: key)
+                let hasChecked = await revisionTracker.hasCheckedRev(for: key)
                 if !hasChecked {
                     if let currentRev = await getCurrentRev(for: filePath) {
                         if currentRev != cachedEntry.rev {
                             if let (image, rev) = await downloadImage(from: filePath) {
                                 await store(image: image, rev: rev, forKey: key)
-                                await markRevAsChecked(for: key)
+                                await revisionTracker.markRevAsChecked(for: key)
                                 return image
                             } else {
-                                await markRevAsChecked(for: key)
+                                await revisionTracker.markRevAsChecked(for: key)
                                 return cachedEntry.image
                             }
                         } else {
-                            await markRevAsChecked(for: key)
+                            await revisionTracker.markRevAsChecked(for: key)
                             memoryCache.setObject(cachedEntry, forKey: nsKey, cost: imageCost(for: cachedEntry.image))
-                            await updateAccessOrder(for: key)
+                            updateFileAccessDate(forKey: key)
                             return cachedEntry.image
                         }
                     } else {
-                        await markRevAsChecked(for: key)
+                        await revisionTracker.markRevAsChecked(for: key)
                         memoryCache.setObject(cachedEntry, forKey: nsKey, cost: imageCost(for: cachedEntry.image))
-                        await updateAccessOrder(for: key)
+                        updateFileAccessDate(forKey: key)
                         return cachedEntry.image
                     }
                 } else {
                     memoryCache.setObject(cachedEntry, forKey: nsKey, cost: imageCost(for: cachedEntry.image))
-                    await updateAccessOrder(for: key)
+                    updateFileAccessDate(forKey: key)
                     return cachedEntry.image
                 }
             } else {
                 memoryCache.setObject(cachedEntry, forKey: nsKey, cost: imageCost(for: cachedEntry.image))
-                await updateAccessOrder(for: key)
+                updateFileAccessDate(forKey: key)
                 return cachedEntry.image
             }
         }
@@ -208,7 +208,7 @@ final class DropBoxImageService: ImageCacheClient {
         if let (image, rev) = await downloadImage(from: filePath) {
             await store(image: image, rev: rev, forKey: key)
             if checkRev {
-                await markRevAsChecked(for: key)
+                await revisionTracker.markRevAsChecked(for: key)
             }
             return image
         }
@@ -227,37 +227,27 @@ final class DropBoxImageService: ImageCacheClient {
         }
     }
     
-    /// - Parameters:
-    ///   - filePaths: An array of Dropbox file paths to prefetch.
-    ///   - checkRev: A flag indicating whether to verify the image revision with Dropbox.
-    ///   - withConcurrencyOf concurrency: A number of concurrent operations.
-    public func prefetch(
-        filePaths: [String],
-        checkRev: Bool = true,
-        withConcurrencyOf concurrency: Int
-    ) async {
+    /// Prefetches images concurrently.
+    public func prefetch(filePaths: [String], checkRev: Bool = true, withConcurrencyOf concurrency: Int) async {
         let semaphore = AsyncSemaphore(value: concurrency)
         await withTaskGroup(of: Void.self) { group in
             for filePath in filePaths {
                 group.addTask {
-                    await semaphore.wait()  // Wait for a permit.
+                    await semaphore.wait()
                     _ = await self.image(at: filePath, checkRev: checkRev)
-                    await semaphore.signal() // Release the permit.
+                    await semaphore.signal()
                 }
             }
         }
     }
+    
     /// Synchronously clears both the memory and disk caches.
-    ///
-    /// Call this method when you need to free up cached data.
     public func clearCache() {
         clearMemoryCache()
         clearDiskCacheSync()
     }
     
     /// Asynchronously clears both the memory and disk caches.
-    ///
-    /// Use this version when calling from a Swift Concurrency context.
     public func clearCacheAsync() async {
         clearMemoryCache()
         await withCheckedContinuation { continuation in
@@ -269,11 +259,8 @@ final class DropBoxImageService: ImageCacheClient {
                 do {
                     try self.fileManager.removeItem(at: self.diskCacheURL)
                     try self.fileManager.createDirectory(at: self.diskCacheURL, withIntermediateDirectories: true, attributes: nil)
-                    self.accessOrderQueue.async(flags: .barrier) {
-                        self.accessOrder.removeAll()
-                        self.resetCheckedRevKeys()
-                        continuation.resume()
-                    }
+                    Task { await self.revisionTracker.reset() }
+                    continuation.resume()
                 } catch {
                     print("Error clearing disk cache: \(error)")
                     continuation.resume()
@@ -284,16 +271,13 @@ final class DropBoxImageService: ImageCacheClient {
     
     // MARK: - Private Disk Cache Helpers
     
-    /// Synchronously clears the disk cache and resets related tracking data.
+    /// Synchronously clears the disk cache.
     private func clearDiskCacheSync() {
         ioQueue.sync(flags: .barrier) {
             do {
                 try fileManager.removeItem(at: diskCacheURL)
                 try fileManager.createDirectory(at: diskCacheURL, withIntermediateDirectories: true, attributes: nil)
-                accessOrderQueue.sync(flags: .barrier) {
-                    accessOrder.removeAll()
-                }
-                resetCheckedRevKeys()
+                Task { await revisionTracker.reset() }
             } catch {
                 print("Error clearing disk cache: \(error)")
             }
@@ -302,19 +286,13 @@ final class DropBoxImageService: ImageCacheClient {
     
     // MARK: - Private Utility Methods
     
-    /// Clears the in-memory cache and resets revision tracking.
+    /// Clears the in-memory cache.
     private func clearMemoryCache() {
         memoryCache.removeAllObjects()
-        accessOrderQueue.async(flags: .barrier) {
-            self.accessOrder.removeAll()
-        }
-        resetCheckedRevKeys()
+        Task { await revisionTracker.reset() }
     }
     
     /// Generates a unique cache key for a given Dropbox file path using SHA256 hashing.
-    ///
-    /// - Parameter filePath: The Dropbox file path.
-    /// - Returns: A hexadecimal string representing the hashed cache key.
     private func cacheKey(for filePath: String) -> String {
         let data = Data(filePath.utf8)
         var hash = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
@@ -325,41 +303,32 @@ final class DropBoxImageService: ImageCacheClient {
     }
     
     /// Loads an image and its revision from disk asynchronously.
-    ///
-    /// - Parameter key: The cache key.
-    /// - Returns: A `CachedImageEntry` if the file exists on disk; otherwise, `nil`.
     private func loadImageAndRevFromDisk(forKey key: String) async -> CachedImageEntry? {
         await withCheckedContinuation { continuation in
-            ioQueue.async { [weak self] in
-                guard let self = self else {
-                    continuation.resume(returning: nil)
-                    return
+            ioQueue.async {
+                autoreleasepool {
+                    let imageURL = self.diskCacheURL.appendingPathComponent(key)
+                    let revURL = self.diskCacheURL.appendingPathComponent("\(key).rev")
+                    
+                    guard
+                        let imageData = try? Data(contentsOf: imageURL),
+                        let image = self.decodeImage(data: imageData),
+                        let revData = try? Data(contentsOf: revURL),
+                        let rev = String(data: revData, encoding: .utf8)
+                    else {
+                        continuation.resume(returning: nil)
+                        return
+                    }
+                    
+                    let cachedEntry = CachedImageEntry(image: image, rev: rev)
+                    self.updateFileAccessDate(for: imageURL)
+                    continuation.resume(returning: cachedEntry)
                 }
-                let imageURL = self.diskCacheURL.appendingPathComponent(key)
-                let revURL = self.diskCacheURL.appendingPathComponent("\(key).rev")
-                
-                guard
-                    let imageData = try? Data(contentsOf: imageURL),
-                    let image = self.decodeImage(data: imageData),
-                    let revData = try? Data(contentsOf: revURL),
-                    let rev = String(data: revData, encoding: .utf8)
-                else {
-                    continuation.resume(returning: nil)
-                    return
-                }
-                
-                let cachedEntry = CachedImageEntry(image: image, rev: rev)
-                // Update file access date to reflect recent use.
-                self.updateFileAccessDate(for: imageURL)
-                continuation.resume(returning: cachedEntry)
             }
         }
     }
     
     /// Downloads an image from Dropbox asynchronously.
-    ///
-    /// - Parameter filePath: The Dropbox file path.
-    /// - Returns: A tuple containing the downloaded `UIImage` and its revision, or `nil` if download fails.
     private func downloadImage(from filePath: String) async -> (UIImage, String)? {
         guard let client = client else {
             print("Dropbox client not set.")
@@ -370,8 +339,10 @@ final class DropBoxImageService: ImageCacheClient {
             guard let image = decodeImage(data: fileData) else {
                 return nil
             }
+            // Downscale the image to reduce memory footprint.
+            let downscaledImage = downscaleImage(image)
             let rev = metadata.rev
-            return (image, rev)
+            return (downscaledImage, rev)
         } catch {
             print("Error downloading image from Dropbox: \(error)")
             return nil
@@ -379,46 +350,34 @@ final class DropBoxImageService: ImageCacheClient {
     }
     
     /// Stores an image (and its revision) into both the memory and disk caches asynchronously.
-    ///
-    /// - Parameters:
-    ///   - image: The `UIImage` to store.
-    ///   - rev: The Dropbox revision identifier.
-    ///   - key: The cache key.
     private func store(image: UIImage, rev: String, forKey key: String) async {
-        // Store in memory.
         let cachedEntry = CachedImageEntry(image: image, rev: rev)
         memoryCache.setObject(cachedEntry, forKey: key as NSString, cost: imageCost(for: image))
-        await updateAccessOrder(for: key)
-        
-        // Store on disk.
         await withCheckedContinuation { continuation in
-            ioQueue.async(flags: .barrier) { [weak self] in
-                guard let self = self else {
-                    continuation.resume()
-                    return
-                }
-                let imageURL = self.diskCacheURL.appendingPathComponent(key)
-                let revURL = self.diskCacheURL.appendingPathComponent("\(key).rev")
-                
-                if let data = image.pngData(), let revData = rev.data(using: .utf8) {
-                    do {
-                        try data.write(to: imageURL, options: .atomic)
-                        try revData.write(to: revURL, options: .atomic)
-                        self.updateFileAccessDate(for: imageURL)
-                        self.controlDiskCacheSize()
-                    } catch {
-                        print("Error writing image or rev to disk: \(error)")
+            ioQueue.async(flags: .barrier) {
+                autoreleasepool {
+                    let imageURL = self.diskCacheURL.appendingPathComponent(key)
+                    let revURL = self.diskCacheURL.appendingPathComponent("\(key).rev")
+                    
+                    // Store as JPEG to reduce disk usage.
+                    if let data = image.jpegData(compressionQuality: 0.8),
+                       let revData = rev.data(using: .utf8) {
+                        do {
+                            try data.write(to: imageURL, options: .atomic)
+                            try revData.write(to: revURL, options: .atomic)
+                            self.updateFileAccessDate(for: imageURL)
+                            self.controlDiskCacheSize()
+                        } catch {
+                            print("Error writing image or rev to disk: \(error)")
+                        }
                     }
+                    continuation.resume()
                 }
-                continuation.resume()
             }
         }
     }
     
-    /// Fetches the current revision (`rev`) for a Dropbox file asynchronously.
-    ///
-    /// - Parameter filePath: The Dropbox file path.
-    /// - Returns: The current revision string or `nil` if an error occurs.
+    /// Fetches the current Dropbox revision for a file.
     private func getCurrentRev(for filePath: String) async -> String? {
         guard let client = client else {
             print("Dropbox client not set.")
@@ -433,9 +392,7 @@ final class DropBoxImageService: ImageCacheClient {
         }
     }
     
-    /// Updates the file's last modification date to the current date.
-    ///
-    /// - Parameter fileURL: The URL of the file to update.
+    /// Updates the file's last modification date.
     private func updateFileAccessDate(for fileURL: URL) {
         do {
             try fileManager.setAttributes([.modificationDate: Date()], ofItemAtPath: fileURL.path)
@@ -444,13 +401,15 @@ final class DropBoxImageService: ImageCacheClient {
         }
     }
     
-    /// Decodes raw image data into a `UIImage` and forces decompression off the main thread.
-    ///
-    /// - Parameter data: The raw image data.
-    /// - Returns: A decoded `UIImage`, or `nil` if decoding fails.
+    /// Convenience to update file access date using the cache key.
+    private func updateFileAccessDate(forKey key: String) {
+        let fileURL = diskCacheURL.appendingPathComponent(key)
+        updateFileAccessDate(for: fileURL)
+    }
+    
+    /// Decodes raw image data into a UIImage, forcing decompression off the main thread.
     private func decodeImage(data: Data) -> UIImage? {
         guard let image = UIImage(data: data) else { return nil }
-        // Force image decompression.
         UIGraphicsBeginImageContextWithOptions(image.size, false, image.scale)
         image.draw(at: .zero)
         let decodedImage = UIGraphicsGetImageFromCurrentImageContext()
@@ -458,32 +417,27 @@ final class DropBoxImageService: ImageCacheClient {
         return decodedImage
     }
     
+    /// Downscales an image if its largest dimension exceeds maxDimension.
+    private func downscaleImage(_ image: UIImage, maxDimension: CGFloat = 1024) -> UIImage {
+        let width = image.size.width
+        let height = image.size.height
+        let largerDimension = max(width, height)
+        if largerDimension <= maxDimension {
+            return image
+        }
+        let scale = maxDimension / largerDimension
+        let newSize = CGSize(width: width * scale, height: height * scale)
+        UIGraphicsBeginImageContextWithOptions(newSize, false, image.scale)
+        image.draw(in: CGRect(origin: .zero, size: newSize))
+        let downscaledImage = UIGraphicsGetImageFromCurrentImageContext() ?? image
+        UIGraphicsEndImageContext()
+        return downscaledImage
+    }
+    
     /// Calculates an approximate memory cost for a given image.
-    ///
-    /// - Parameter image: The `UIImage` for which to calculate cost.
-    /// - Returns: An integer representing the estimated memory usage.
     private func imageCost(for image: UIImage) -> Int {
         guard let cgImage = image.cgImage else { return 1 }
         return cgImage.bytesPerRow * cgImage.height
-    }
-    
-    /// Updates the LRU (least recently used) access order for the given cache key.
-    ///
-    /// - Parameter key: The cache key to update.
-    private func updateAccessOrder(for key: String) async {
-        await withCheckedContinuation { continuation in
-            accessOrderQueue.async(flags: .barrier) { [weak self] in
-                guard let self = self else {
-                    continuation.resume()
-                    return
-                }
-                if let index = self.accessOrder.firstIndex(of: key) {
-                    self.accessOrder.remove(at: index)
-                }
-                self.accessOrder.append(key)
-                continuation.resume()
-            }
-        }
     }
     
     /// Checks and controls the disk cache size, evicting the least recently used files if necessary.
@@ -539,41 +493,9 @@ final class DropBoxImageService: ImageCacheClient {
             }
         }
     }
-    
-    // MARK: - Revision Check Tracking
-    
-    /// Asynchronously checks if the given cache key’s revision has already been verified this session.
-    ///
-    /// - Parameter key: The cache key.
-    /// - Returns: `true` if the revision has been checked; otherwise, `false`.
-    private func hasCheckedRev(for key: String) async -> Bool {
-        await withCheckedContinuation { continuation in
-            checkedRevKeysQueue.async {
-                let result = self.checkedRevKeys.contains(key)
-                continuation.resume(returning: result)
-            }
-        }
-    }
-    
-    /// Marks a cache key’s revision as having been checked.
-    ///
-    /// - Parameter key: The cache key.
-    private func markRevAsChecked(for key: String) async {
-        await withCheckedContinuation { continuation in
-            checkedRevKeysQueue.async(flags: .barrier) {
-                self.checkedRevKeys.insert(key)
-                continuation.resume()
-            }
-        }
-    }
-    
-    /// Resets all revision check tracking.
-    private func resetCheckedRevKeys() {
-        checkedRevKeysQueue.async(flags: .barrier) {
-            self.checkedRevKeys.removeAll()
-        }
-    }
 }
+
+// MARK: - AsyncSemaphore
 
 internal actor AsyncSemaphore {
     private var value: Int
