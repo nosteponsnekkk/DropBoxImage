@@ -51,8 +51,8 @@ final class DropBoxImageService: ImageCacheClient {
     
     /// Maximum allowed disk cache size (800 MB).
     private let maxDiskCacheSize: UInt64 = 800 * 1024 * 1024
-    /// Maximum allowed cost for the memory cache (400 MB).
-    private let maxMemoryCacheCost: Int = 400 * 1024 * 1024
+    /// Maximum allowed cost for the memory cache (100 MB).
+    private let maxMemoryCacheCost: Int = 100 * 1024 * 1024
     
     /// Array to track LRU (least recently used) access order for cached keys.
     private var accessOrder: [String] = []
