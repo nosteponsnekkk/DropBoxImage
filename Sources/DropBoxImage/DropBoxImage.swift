@@ -18,11 +18,13 @@ public struct DropBoxImage<Placeholder: View>: View {
     let placeholder: Placeholder
     let onImageSet: ((Bool) -> Void)?
     let checkRevision: Bool
+    let format: ImageStorageFormat
     @StateObject private var loader: ImageLoader
     
     public init(imagePath: String?,
                 renderingMode: Image.TemplateRenderingMode = .original,
                 checkRevision: Bool = true,
+                format: ImageStorageFormat = .jpeg(quality: 0.8),
                 onImageSet: ((Bool) -> Void)? = nil,
                 onImageDataLoaded: ((Data) -> Void)? = nil,
                 @ViewBuilder placeholder: () -> Placeholder) {
@@ -31,10 +33,12 @@ public struct DropBoxImage<Placeholder: View>: View {
         self.checkRevision = checkRevision
         self.placeholder = placeholder()
         self.onImageSet = onImageSet
+        self.format = format
         _loader = StateObject(
             wrappedValue: ImageLoader(
                 imagePath: imagePath,
                 checkRevision: checkRevision,
+                format: format, 
                 onImageDataLoaded: onImageDataLoaded
             )
         )
@@ -46,7 +50,7 @@ public struct DropBoxImage<Placeholder: View>: View {
                 loader.cancelLoading()
             }
             .onChange(of: imagePath) { newPath in
-                loader.updateImagePath(newPath)
+                loader.updateImagePath(newPath, format: format)
             }
             .onChange(of: loader.image) { newImage in
                 onImageSet?(newImage != nil)

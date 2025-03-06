@@ -22,22 +22,22 @@ final class ImageLoader: ObservableObject {
     private let checkRevision: Bool
     private let onImageDataLoaded: ((Data) -> Void)?
 
-    init(imagePath: String?, checkRevision: Bool = true, cacheClient: ImageCacheClient = DropBoxImageService.shared, onImageDataLoaded: ((Data) -> Void)? = nil) {
+    init(imagePath: String?, checkRevision: Bool = true, cacheClient: ImageCacheClient = DropBoxImageService.shared, format: ImageStorageFormat, onImageDataLoaded: ((Data) -> Void)? = nil) {
         self.imagePath = imagePath
         self.cacheClient = cacheClient
         self.checkRevision = checkRevision
         self.onImageDataLoaded = onImageDataLoaded
         if let imagePath = imagePath {
-            loadImage(from: imagePath)
+            loadImage(from: imagePath, format: format)
         }
     }
     
-    public func updateImagePath(_ newPath: String?) {
+    public func updateImagePath(_ newPath: String?, format: ImageStorageFormat) {
         if imagePath != newPath {
             imagePath = newPath
             image = nil
             hasFailed = false
-            loadImage(from: newPath)
+            loadImage(from: newPath, format: format)
         }
     }
     
@@ -46,12 +46,12 @@ final class ImageLoader: ObservableObject {
         currentTask = nil
     }
     
-    private func loadImage(from filePath: String?) {
+    private func loadImage(from filePath: String?, format: ImageStorageFormat) {
         guard let filePath = filePath else { return }
         isLoading = true
         currentTask?.cancel()
         currentTask = Task {
-            let fetchedImage = await cacheClient.image(at: filePath, checkRev: checkRevision)
+            let fetchedImage = await cacheClient.image(at: filePath, checkRev: checkRevision, format: format)
             if let data = fetchedImage?.jpegData(compressionQuality: 0.8) {
                 onImageDataLoaded?(data)
             }
